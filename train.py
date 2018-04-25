@@ -12,6 +12,7 @@ from torch.autograd import Variable
 from model import capsules
 from loss import SpreadLoss
 from datasets import smallNORB
+from datasets.action_dataset import ActionDataset, prepareDataset
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch Matrix-Capsules-EM')
@@ -27,7 +28,7 @@ parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate (default: 0.01)')
 parser.add_argument('--weight-decay', type=float, default=0, metavar='WD',
                     help='weight decay (default: 0)')
-parser.add_argument('--no-cuda', action='store_true', default=False,
+parser.add_argument('--no-cuda', action='store_true', default=True,
                     help='disables CUDA training')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
@@ -81,6 +82,43 @@ def get_setting(args):
                           transforms.ToTensor()
                       ])),
             batch_size=args.test_batch_size, shuffle=True, **kwargs)
+    elif args.dataset == "KTH":
+        print("Preparing KTH data...")
+        print("train batch size: ", args.batch_size)
+        print("test batch size: ", args.test_batch_size)
+
+        train_data = prepareDataset("/Volumes/E_128/train")
+        test_data = prepareDataset("/Volumes/E_128/test")
+        num_class = 6
+
+        # train
+        classes={
+            "handwaving": 0,
+            "handclapping": 1,
+            "boxing": 2,
+            "walking": 3,
+            "running": 4,
+            "jogging": 5
+        }
+
+        action_dataset_train = ActionDataset(train_data, classes, transforms=transforms.Compose([
+                          transforms.Resize(48),
+                          transforms.RandomCrop(32),
+                          transforms.ColorJitter(brightness=32./255, contrast=0.5),
+                          transforms.ToTensor()
+                      ]))
+
+        train_loader = torch.utils.data.DataLoader(action_dataset_train, batch_size=args.batch_size,
+                                                   shuffle=True, **kwargs)
+
+        action_dataset_test = ActionDataset(test_data, classes, transforms=transforms.Compose([
+            transforms.Resize(48),
+            transforms.RandomCrop(32),
+            transforms.ToTensor()
+        ]))
+
+        test_loader = torch.utils.data.DataLoader(action_dataset_test, batch_size=args.test_batch_size,
+                                                  shuffle=True, **kwargs)
     else:
         raise NameError('Undefined dataset {}'.format(args.dataset))
     return num_class, train_loader, test_loader
@@ -121,6 +159,7 @@ class AverageMeter(object):
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
+    print("Started training...")
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
@@ -156,6 +195,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   100. * batch_idx / len(train_loader),
                   loss.data[0], acc[0].data[0],
                   batch_time=batch_time, data_time=data_time))
+
     return epoch_acc
 
 
@@ -168,17 +208,21 @@ def snapshot(model, folder, epoch):
 
 
 def test(test_loader, model, criterion):
+    print("Started testing...")
     model.eval()
     test_loss = 0
     acc = 0
     test_len = len(test_loader)
-    for data, target in test_loader:
+    for batch_idx, (data, target) in enumerate(test_loader):
         if args.cuda:
             data, target = data.cuda(), target.cuda()
         data, target = Variable(data, volatile=True), Variable(target)
         output = model(data)
         test_loss += criterion(output, target, r=1).data[0]
         acc += accuracy(output, target)[0].data[0]
+
+        if batch_idx % args.log_interval == 0:
+            print("Finished testing batch: [%d/%d]" % (batch_idx, test_len))
 
     test_loss /= test_len
     acc /= test_len
@@ -204,6 +248,8 @@ def main():
     # A, B, C, D = 32, 32, 32, 32
     model = capsules(A=A, B=B, C=C, D=D,
                      E=num_class, iters=args.em_iters)
+
+    print("Architecture construction finished...")
     if args.cuda:
         model.cuda()
 
@@ -213,6 +259,7 @@ def main():
 
     best_acc = test(test_loader, model, criterion)
     for epoch in range(1, args.epochs + 1):
+        print("Starting epoch: [%d/%d]" % (epoch, args.epochs))
         acc = train(train_loader, model, criterion, optimizer, epoch)
         acc /= len(train_loader)
         scheduler.step(acc)
@@ -222,6 +269,7 @@ def main():
     print('best test accuracy: {:.6f}'.format(best_acc))
 
     snapshot(model, args.snapshot_folder, args.epochs)
+
 
 if __name__ == '__main__':
     main()
