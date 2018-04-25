@@ -265,10 +265,9 @@ def main():
         scheduler.step(acc)
         if epoch % args.test_intvl == 0:
             best_acc = max(best_acc, test(test_loader, model, criterion))
-    best_acc = max(best_acc, test(test_loader, model, criterion))
-    print('best test accuracy: {:.6f}'.format(best_acc))
-
-    snapshot(model, args.snapshot_folder, args.epochs)
+            best_acc = max(best_acc, test(test_loader, model, criterion))
+            print('best test accuracy: {:.6f}'.format(best_acc))
+            snapshot(model, args.snapshot_folder, args.epochs)
 
 
 if __name__ == '__main__':
